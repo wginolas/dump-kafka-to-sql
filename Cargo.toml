@@ -1,0 +1,10 @@
+[package]
+name = "dump-kafka-to-sql"
+version = "0.0.1"
+authors = ["Woflgang <wolfgang@birne>"]
+
+[dependencies]
+kafka = "0.3.0"
+clap = "2.3.0"
+rusqlite = "0.6.0"
+
