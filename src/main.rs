@@ -2,8 +2,8 @@ extern crate kafka;
 extern crate clap;
 
 use std::thread;
-use std::sync::mpsc::channel;
-use kafka::consumer::{Consumer, FetchOffset};
+use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
+use kafka::consumer::{Consumer, FetchOffset, MessageSets};
 use clap::{Arg, App, AppSettings};
 
 #[derive(Clone)]
@@ -41,7 +41,7 @@ fn parse_args() -> Args {
     }
 }
 
-fn read_topic(args: Args) {
+fn read_topic(args: Args, tx: SyncSender<MessageSets>) {
     let mut c = Consumer::from_hosts(args.brokers, "dump-kafka-to-sql".to_string(), args.topic)
         .with_fetch_max_wait_time(100)
         .with_fetch_min_bytes(1_000)
@@ -54,18 +54,34 @@ fn read_topic(args: Args) {
         if message_sets.is_empty() {
             break;
         }
-        for ms in message_sets.iter() {
-            for m in ms.messages() {
-                let s = String::from_utf8_lossy(m.value);
-                println!("{} {} {} {}", ms.topic(), ms.partition(), m.offset, s);
-            }
-        }
+        tx.send(message_sets).unwrap();
         c.commit_consumed().unwrap();
+    }
+}
+
+fn save_data(args: Args, rx: Receiver<MessageSets>) {
+    loop {
+        match rx.recv() {
+            Ok(message_sets) => {
+                for ms in message_sets.iter() {
+                    for m in ms.messages() {
+                        let s = String::from_utf8_lossy(m.value);
+                        println!("{} {} {} {}", ms.topic(), ms.partition(), m.offset, s);
+                    }
+                }
+            }
+            Err(_) => break
+        }
+
     }
 }
 
 fn main() {
     let args = parse_args();
-    let (rx, tx) = channel();
-    let read_thread = thread::spawn(move|| read_topic(args.clone(), tx));
+    let args1 = args.clone();
+    let args2 = args.clone();
+    let (tx, rx) = sync_channel(10);
+    thread::spawn(move|| read_topic(args1, tx));
+    let save_thread = thread::spawn(move|| save_data(args2, rx));
+    save_thread.join().unwrap();
 }
