@@ -1,10 +1,13 @@
 extern crate kafka;
 extern crate clap;
+extern crate rusqlite;
 
 use std::thread;
 use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
 use kafka::consumer::{Consumer, FetchOffset, MessageSets};
 use clap::{Arg, App, AppSettings};
+use rusqlite::Connection;
+use std::path::Path;
 
 #[derive(Clone)]
 struct Args {
@@ -60,6 +63,14 @@ fn read_topic(args: Args, tx: SyncSender<MessageSets>) {
 }
 
 fn save_data(args: Args, rx: Receiver<MessageSets>) {
+    let conn = Connection::open(Path::new("dump.sqlite")).unwrap();
+    conn.execute(
+        &format!(
+            "create table {} (partition integer, offset integer, key blob, value blob)",
+            args.topic),
+        &[]).unwrap();
+    let transaction = conn.transaction().unwrap();
+    let mut insert = conn.prepare(&format!("insert into {}(partition, offset, key, value) values(?, ?, ?, ?)", args.topic)).unwrap();
     loop {
         match rx.recv() {
             Ok(message_sets) => {
@@ -67,13 +78,14 @@ fn save_data(args: Args, rx: Receiver<MessageSets>) {
                     for m in ms.messages() {
                         let s = String::from_utf8_lossy(m.value);
                         println!("{} {} {} {}", ms.topic(), ms.partition(), m.offset, s);
+                        insert.execute(&[&ms.partition(), &m.offset, &m.key, &m.value]).unwrap();
                     }
                 }
             }
             Err(_) => break
         }
-
     }
+    transaction.commit().unwrap();
 }
 
 fn main() {
