@@ -4,6 +4,7 @@ extern crate rusqlite;
 
 use std::thread;
 use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
+use std::fs::remove_file;
 use kafka::consumer::{Consumer, FetchOffset, MessageSets};
 use clap::{Arg, App, AppSettings};
 use rusqlite::Connection;
@@ -63,10 +64,12 @@ fn read_topic(args: Args, tx: SyncSender<MessageSets>) {
 }
 
 fn save_data(args: Args, rx: Receiver<MessageSets>) {
-    let conn = Connection::open(Path::new("dump.sqlite")).unwrap();
+    let path = Path::new("dump.sqlite");
+    remove_file(path).is_ok();
+    let conn = Connection::open(path).unwrap();
     conn.execute(
         &format!(
-            "create table {} (partition integer, offset integer, key blob, value blob)",
+            "create table {} (partition integer, offset integer, key blob, value blob, primary key (partition, offset))",
             args.topic),
         &[]).unwrap();
     let transaction = conn.transaction().unwrap();
