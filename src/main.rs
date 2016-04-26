@@ -1,3 +1,9 @@
+//! dump-kafka-into-sqlite
+//! ======================
+//!
+//! Todo
+//!   * Compact switch
+
 extern crate kafka;
 extern crate clap;
 extern crate rusqlite;
@@ -13,7 +19,8 @@ use std::path::Path;
 #[derive(Clone)]
 struct Args {
     topic: String,
-    brokers: Vec<String>
+    brokers: Vec<String>,
+    compact: bool
 }
 
 fn parse_args() -> Args {
@@ -31,9 +38,13 @@ fn parse_args() -> Args {
         .arg(Arg::with_name("BROKER")
              .short("b")
              .long("broker")
-             .help("A Kafka broker. Multiple brokers can be specified. When no broker is given 'localhost:9092' is used.")
+             .help("The Kafka broker. Multiple brokers can be specified. When no broker is given 'localhost:9092' is used.")
              .takes_value(true)
              .multiple(true))
+        .arg(Arg::with_name("c")
+             .short("c")
+             .long("compact")
+             .help("Only store the last message for each key. If the last message has no value, nothing is stored. This behaves like 'log.cleanup.policy=compact'."))
         .get_matches();
 
     Args {
@@ -41,7 +52,8 @@ fn parse_args() -> Args {
         brokers: match matches.values_of("BROKER") {
             Some(x) => x.map(|s| s.to_string()).collect(),
             None => vec!["localhost:9092".to_string()]
-        }
+        },
+        compact: matches.is_present("c")
     }
 }
 
@@ -63,15 +75,19 @@ fn read_topic(args: Args, tx: SyncSender<MessageSets>) {
     }
 }
 
-fn save_data(args: Args, rx: Receiver<MessageSets>) {
-    let path = Path::new("dump.sqlite");
-    remove_file(path).is_ok();
-    let conn = Connection::open(path).unwrap();
+fn create_table(args: &Args, conn: &Connection) {
     conn.execute(
         &format!(
             "create table {} (partition integer, offset integer, key blob, value blob, primary key (partition, offset))",
             args.topic),
         &[]).unwrap();
+}
+
+fn save_data(args: Args, rx: Receiver<MessageSets>) {
+    let path = Path::new("dump.sqlite");
+    remove_file(path).is_ok();
+    let conn = Connection::open(path).unwrap();
+    create_table(&args, &conn);
     let transaction = conn.transaction().unwrap();
     let mut insert = conn.prepare(&format!("insert into {}(partition, offset, key, value) values(?, ?, ?, ?)", args.topic)).unwrap();
     loop {
