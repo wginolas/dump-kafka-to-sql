@@ -2,7 +2,7 @@
 //! ======================
 //!
 //! Todo
-//!   * Compact switch
+//!   * Set output name
 
 extern crate kafka;
 extern crate clap;
@@ -75,21 +75,30 @@ fn read_topic(args: Args, tx: SyncSender<MessageSets>) {
     }
 }
 
-fn create_table(args: &Args, conn: &Connection) {
+fn create_table(args: &Args, conn: &Connection) -> String {
+    let table_name = args.topic.replace(".", "_");
+    let constraint = if args.compact {
+        ", unique (key) on conflict replace"
+    } else {
+        ""
+    };
     conn.execute(
         &format!(
-            "create table {} (partition integer, offset integer, key blob, value blob, primary key (partition, offset))",
-            args.topic),
+            "create table {} (partition integer, offset integer, key blob, value blob, primary key (partition, offset){})",
+            table_name,
+            constraint),
         &[]).unwrap();
+    table_name
 }
 
 fn save_data(args: Args, rx: Receiver<MessageSets>) {
     let path = Path::new("dump.sqlite");
     remove_file(path).is_ok();
     let conn = Connection::open(path).unwrap();
-    create_table(&args, &conn);
+    let table_name = create_table(&args, &conn);
     let transaction = conn.transaction().unwrap();
-    let mut insert = conn.prepare(&format!("insert into {}(partition, offset, key, value) values(?, ?, ?, ?)", args.topic)).unwrap();
+    let mut insert = conn.prepare(&format!("insert into {}(partition, offset, key, value) values(?, ?, ?, ?)", table_name)).unwrap();
+    let mut delete = conn.prepare(&format!("delete from {} where key = ?", table_name)).unwrap();
     loop {
         match rx.recv() {
             Ok(message_sets) => {
@@ -97,7 +106,11 @@ fn save_data(args: Args, rx: Receiver<MessageSets>) {
                     for m in ms.messages() {
                         let s = String::from_utf8_lossy(m.value);
                         println!("{} {} {} {}", ms.topic(), ms.partition(), m.offset, s);
-                        insert.execute(&[&ms.partition(), &m.offset, &m.key, &m.value]).unwrap();
+                        if args.compact && m.value.len() == 0 {
+                            delete.execute(&[&m.key]).unwrap();
+                        } else {
+                            insert.execute(&[&ms.partition(), &m.offset, &m.key, &m.value]).unwrap();
+                        }
                     }
                 }
             }
