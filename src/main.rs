@@ -3,6 +3,9 @@
 //!
 //! Todo
 //!   * Set output name
+//!   * Error handling
+//!   * Print progress
+//!   * Extract JSON paths from the value into table columns
 
 extern crate kafka;
 extern crate clap;
@@ -18,8 +21,9 @@ use std::path::Path;
 
 #[derive(Clone)]
 struct Args {
-    topic: String,
     brokers: Vec<String>,
+    topic: String,
+    output: String,
     compact: bool
 }
 
@@ -29,18 +33,23 @@ fn parse_args() -> Args {
         .author("Wolfgang Ginolas <wolfgang.ginolas@gwif.eu>")
         .about("Dump a Kafka topic into a SQLite database")
         .setting(AppSettings::ColoredHelp)
-        .arg(Arg::with_name("TOPIC")
-             .short("t")
-             .long("topic")
-             .help("A Kafka topic to read.")
-             .takes_value(true)
-             .required(true))
         .arg(Arg::with_name("BROKER")
              .short("b")
              .long("broker")
-             .help("The Kafka broker. Multiple brokers can be specified. When no broker is given 'localhost:9092' is used.")
+             .help("A Kafka broker. Multiple brokers can be specified. When no broker is given 'localhost:9092' is used.")
              .takes_value(true)
              .multiple(true))
+        .arg(Arg::with_name("TOPIC")
+             .short("t")
+             .long("topic")
+             .help("The Kafka topic to read.")
+             .takes_value(true)
+             .required(true))
+        .arg(Arg::with_name("OUTPUT")
+             .short("o")
+             .long("output")
+             .help("The output file name. When no file name is given 'dump.sqlite' is used.")
+             .takes_value(true))
         .arg(Arg::with_name("c")
              .short("c")
              .long("compact")
@@ -48,11 +57,12 @@ fn parse_args() -> Args {
         .get_matches();
 
     Args {
-        topic: matches.value_of("TOPIC").unwrap_or("topic").to_string(),
         brokers: match matches.values_of("BROKER") {
             Some(x) => x.map(|s| s.to_string()).collect(),
             None => vec!["localhost:9092".to_string()]
         },
+        topic: matches.value_of("TOPIC").unwrap_or("topic").to_string(),
+        output: matches.value_of("OUTPUT").unwrap_or("dump.sqlite").to_string(),
         compact: matches.is_present("c")
     }
 }
@@ -92,7 +102,7 @@ fn create_table(args: &Args, conn: &Connection) -> String {
 }
 
 fn save_data(args: Args, rx: Receiver<MessageSets>) {
-    let path = Path::new("dump.sqlite");
+    let path = Path::new(&args.output);
     remove_file(path).is_ok();
     let conn = Connection::open(path).unwrap();
     let table_name = create_table(&args, &conn);
