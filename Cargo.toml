@@ -7,4 +7,3 @@ authors = ["Woflgang <wolfgang@birne>"]
 kafka = "0.3.0"
 clap = "2.3.0"
 rusqlite = "0.6.0"
-
