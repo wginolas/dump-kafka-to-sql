@@ -2,7 +2,6 @@
 //! ======================
 //!
 //! Todo
-//!   * Set output name
 //!   * Error handling
 //!   * Print progress
 //!   * Extract JSON paths from the value into table columns
